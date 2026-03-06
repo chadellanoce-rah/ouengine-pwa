@@ -701,8 +701,8 @@ function enterApp() {
   renderPlans();
   renderProfile();
   loadSignals();
-  // Recarrega a cada 2 min
-  setInterval(loadSignals, 2 * 60 * 1000);
+  // Recarrega a cada 15 segundos (sincronizado com o watcher)
+  setInterval(loadSignals, 15 * 1000);
 }
 
 function showScreen(name) {
@@ -770,7 +770,7 @@ function renderSignals() {
   let html = `
     <div class="refresh-bar">
       <div class="refresh-dot"></div>
-      <span>Atualiza a cada 2 minutos</span>
+      <span>Preço atualizado a cada 15 segundos</span>
     </div>
     <div class="list-header">
       <div class="list-header-text"><span class="dot-live">● </span>${active.length} sinais ativos</div>
