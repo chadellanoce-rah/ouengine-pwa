@@ -149,9 +149,17 @@
       position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
       height: 6px; background: var(--border); border-radius: 3px;
     }
+    /* Static background gradient (stop → tp range) */
     .pb-grad {
       position: absolute; top: 50%; transform: translateY(-50%);
       height: 6px; border-radius: 3px;
+    }
+    /* Dynamic fill: entry → current price */
+    .pb-fill {
+      position: absolute; top: 50%; transform: translateY(-50%);
+      height: 6px; border-radius: 3px;
+      transition: width .6s cubic-bezier(.4,0,.2,1), left .6s cubic-bezier(.4,0,.2,1), background .6s;
+      z-index: 1;
     }
     .pb-entry-zone {
       position: absolute; top: 50%; transform: translateY(-50%);
@@ -161,27 +169,81 @@
       position: absolute; width: 14px; height: 14px;
       top: 50%; transform: translate(-50%, -50%);
       border: 2px solid var(--bg-card); z-index: 2;
+      transition: box-shadow .4s, background .4s;
     }
     .pb-dot.circle { border-radius: 50%; }
     .pb-dot.square { border-radius: 3px; }
+    /* TP check overlay inside dot */
+    .pb-dot-check {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      font-size: 7px; font-weight: 900; color: var(--bg); z-index: 1;
+      opacity: 0; transition: opacity .3s;
+    }
+    .pb-dot.hit .pb-dot-check { opacity: 1; }
+    .pb-dot.hit { border-color: transparent !important; }
+
+    /* Pulse ring on TP hit */
+    .pb-dot-ring {
+      position: absolute; inset: -5px; border-radius: 50%; border: 2px solid;
+      opacity: 0; pointer-events: none;
+      animation: none;
+    }
+    .pb-dot.hit .pb-dot-ring { opacity: .5; animation: tpPulse 1.8s ease-in-out infinite; }
+    @keyframes tpPulse { 0%,100%{transform:scale(1);opacity:.5} 50%{transform:scale(1.5);opacity:0} }
+
     .pb-needle {
       position: absolute; top: 0; bottom: 0; width: 2px;
       background: #fff; transform: translateX(-50%); z-index: 3;
       box-shadow: 0 0 6px #ffffff99;
+      transition: left .6s cubic-bezier(.4,0,.2,1);
     }
     .pb-needle-label {
-      position: absolute; top: -18px; left: 50%; transform: translateX(-50%);
+      position: absolute; top: -20px; left: 50%; transform: translateX(-50%);
       background: #fff; color: #000; font-size: 8px; font-weight: 700;
-      padding: 1px 4px; border-radius: 2px; white-space: nowrap;
+      padding: 2px 5px; border-radius: 3px; white-space: nowrap;
       font-family: var(--font-mono);
     }
-    .pb-labels { position: relative; height: 36px; margin-top: 4px; }
+    .pb-labels { position: relative; height: 40px; margin-top: 4px; }
     .pb-label {
       position: absolute; transform: translateX(-50%);
       text-align: center; white-space: nowrap;
+      transition: color .4s;
     }
     .pb-label-name  { font-size: 9px; font-weight: 700; line-height: 1.3; font-family: var(--font-mono); }
     .pb-label-value { font-size: 8px; color: var(--text-muted); line-height: 1.3; font-family: var(--font-mono); }
+
+    /* ── Status Bar (trade lifecycle) ────────────────────────── */
+    .trade-status-bar {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 10px; padding: 8px 12px; border-radius: 10px;
+      border: 1px solid; transition: all .4s;
+    }
+    .trade-status-dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+      animation: statusPulse 2s infinite;
+    }
+    @keyframes statusPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.8)} }
+    .trade-status-dot.static { animation: none; }
+    .trade-status-text { font-size: 12px; font-weight: 700; flex: 1; }
+    .trade-status-price { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
+
+    /* ── TP milestone badges ─────────────────────────────────── */
+    .tp-milestones { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+    .tp-milestone {
+      display: flex; align-items: center; gap: 4px;
+      padding: 3px 9px; border-radius: 20px; border: 1px solid;
+      font-size: 10px; font-weight: 700; font-family: var(--font-mono);
+      transition: all .3s;
+    }
+    .tp-milestone.pending { opacity: .35; filter: grayscale(.8); }
+    .tp-milestone.hit {
+      animation: tpBadgeGlow .6s ease forwards;
+    }
+    @keyframes tpBadgeGlow {
+      0%   { transform: scale(1); }
+      50%  { transform: scale(1.12); box-shadow: 0 0 14px currentColor; }
+      100% { transform: scale(1); }
+    }
 
     /* ── Chips ────────────────────────────────────────────────── */
     .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
@@ -446,6 +508,13 @@
       font-size: 12px; font-weight: 700; white-space: nowrap;
     }
     .btn-dismiss { background: none; color: var(--text-muted); font-size: 18px; padding: 0 4px; }
+
+    /* ── Glow animation for active trade ─────────────────────── */
+    @keyframes activeGlow {
+      0%,100% { box-shadow: 0 0 0px #22c55e00; }
+      50%      { box-shadow: 0 0 14px #22c55e44; }
+    }
+    .signal-card.trade-active { animation: activeGlow 3s ease-in-out infinite; }
   </style>
 </head>
 <body>
@@ -583,24 +652,146 @@ const PLAN_LABELS = { free:'FREE', level1:'PLANO 1', level2:'PLANO 2', level3:'P
 const MODE_LABELS = { SCL:'SCALP', DTD:'DAY TRADE', SWG:'SWING' };
 const MODE_COLORS = { SCL:'#f59e0b', DTD:'#3b82f6', SWG:'#8b5cf6' };
 
-const STATUS_LABELS = {
-  waiting: '⏳ Aguardando ativação',
-  active:  '✅ OPERAÇÃO ATIVA',
-  tp1:     '🎯 TP1 atingido',
-  tp2:     '🎯 TP2 atingido',
-  tp3:     '🎯 TP3 atingido',
-  stop:    '🛑 Stop atingido',
-  invalid: '❌ Inválido (stop antes da entrada)',
-};
-const STATUS_COLORS = {
-  waiting: '#64748b',
-  active:  '#22c55e',
-  tp1:     '#4ade80',
-  tp2:     '#22c55e',
-  tp3:     '#10b981',
-  stop:    '#ef4444',
-  invalid: '#ef444488',
-};
+// ══════════════════════════════════════════════════════════════
+//  TRADE STATUS ENGINE
+//  Calcula o status do trade e quais TPs foram atingidos
+//  com base no preço atual, puramente no frontend.
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * Retorna o status calculado do trade dado o sinal + preço atual.
+ * Usado para rendering e para detectar transições de estado.
+ *
+ * @returns {
+ *   status: 'waiting'|'active'|'tp1'|'tp2'|'tp3'|'stop'|'invalid',
+ *   tp1_hit: bool, tp2_hit: bool, tp3_hit: bool,
+ *   entry_executed: bool,
+ *   fill: { direction: 'profit'|'loss'|null, leftPct: number, widthPct: number }
+ * }
+ */
+function calcTradeState(signal, price) {
+  const { bias, stop_loss, entry_min, entry_max, tp1, tp2, tp3 } = signal;
+  const isShort = bias === -1;
+
+  // Sem preço → aguardando
+  if (price == null) {
+    return { status:'waiting', tp1_hit:false, tp2_hit:false, tp3_hit:false, entry_executed:false, fill:null };
+  }
+
+  const entryMin = entry_min;
+  const entryMax = entry_max;
+  const entryMid = (entryMin + entryMax) / 2;
+
+  // Dentro da zona de entrada?
+  const inEntry = price >= entryMin && price <= entryMax;
+
+  // ── ANTES DE ATIVAR: verificar invalidade ──────────────────
+  // SHORT inválido: preço subiu acima do stop antes de entrar na zona
+  // LONG inválido:  preço caiu abaixo do stop antes de entrar na zona
+  // Só marca inválido se o trade ainda não tinha sido ativado antes
+  const prevActivated = signal._activated || false;
+
+  if (!prevActivated) {
+    if (isShort && price > stop_loss) return { status:'invalid', tp1_hit:false, tp2_hit:false, tp3_hit:false, entry_executed:false, fill:null };
+    if (!isShort && price < stop_loss) return { status:'invalid', tp1_hit:false, tp2_hit:false, tp3_hit:false, entry_executed:false, fill:null };
+  }
+
+  // ── VERIFICAR SE ENTRADA FOI EXECUTADA ────────────────────
+  const entry_executed = inEntry || signal._activated || false;
+
+  // Se ainda não entrou na zona, está aguardando
+  if (!entry_executed) {
+    return { status:'waiting', tp1_hit:false, tp2_hit:false, tp3_hit:false, entry_executed:false, fill:null };
+  }
+
+  // A partir daqui o trade está ATIVO (ou encerrado)
+  // ── VERIFICAR TPs ATINGIDOS (retroativo) ──────────────────
+  let tp1_hit = false, tp2_hit = false, tp3_hit = false;
+
+  if (isShort) {
+    // SHORT: preço cai → TPs abaixo do entry
+    if (tp1 != null && price <= tp1) tp1_hit = true;
+    if (tp2 != null && price <= tp2) tp2_hit = true;
+    if (tp3 != null && price <= tp3) tp3_hit = true;
+
+    // Retroativo: se tp2 foi atingido, tp1 também foi
+    if (tp2_hit) tp1_hit = true;
+    if (tp3_hit) { tp1_hit = true; tp2_hit = true; }
+  } else {
+    // LONG: preço sobe → TPs acima do entry
+    if (tp1 != null && price >= tp1) tp1_hit = true;
+    if (tp2 != null && price >= tp2) tp2_hit = true;
+    if (tp3 != null && price >= tp3) tp3_hit = true;
+
+    // Retroativo
+    if (tp2_hit) tp1_hit = true;
+    if (tp3_hit) { tp1_hit = true; tp2_hit = true; }
+  }
+
+  // ── VERIFICAR ENCERRAMENTO ────────────────────────────────
+  // TP3 atingido → encerrado com lucro total
+  if (tp3_hit) {
+    return { status:'tp3', tp1_hit:true, tp2_hit:true, tp3_hit:true, entry_executed:true, fill:buildFill(signal, price, 'profit') };
+  }
+
+  // STOP atingido (após entrada)
+  if (isShort && price >= stop_loss) {
+    return { status:'stop', tp1_hit, tp2_hit, tp3_hit, entry_executed:true, fill:buildFill(signal, price, 'loss') };
+  }
+  if (!isShort && price <= stop_loss) {
+    return { status:'stop', tp1_hit, tp2_hit, tp3_hit, entry_executed:true, fill:buildFill(signal, price, 'loss') };
+  }
+
+  // TP2 atingido mas aberto (sem TP3)
+  if (tp2_hit) {
+    return { status:'tp2', tp1_hit, tp2_hit, tp3_hit:false, entry_executed:true, fill:buildFill(signal, price, 'profit') };
+  }
+  // TP1 atingido mas aberto
+  if (tp1_hit) {
+    return { status:'tp1', tp1_hit, tp2_hit:false, tp3_hit:false, entry_executed:true, fill:buildFill(signal, price, 'profit') };
+  }
+
+  // Ativo em direção favorável (entre entry e tp1)
+  const towardProfit = isShort ? price < entryMid : price > entryMid;
+  const dir = towardProfit ? 'profit' : 'loss';
+
+  return { status:'active', tp1_hit:false, tp2_hit:false, tp3_hit:false, entry_executed:true, fill:buildFill(signal, price, dir) };
+}
+
+/**
+ * Calcula a faixa de preenchimento dinâmico da barra (entry → preço atual).
+ * Retorna { leftPct, widthPct, direction } no espaço normalizado [0,100].
+ */
+function buildFill(signal, price, direction) {
+  const { bias, stop_loss, entry_min, entry_max, tp1, tp2, tp3 } = signal;
+  const entryMid = (entry_min + entry_max) / 2;
+
+  const allVals = [stop_loss, entry_min, entry_max, tp1, tp2, tp3, price].filter(v => v != null);
+  const minVal  = Math.min(...allVals);
+  const range   = Math.max(...allVals) - minVal || 1;
+  const pct     = v => ((v - minVal) / range * 100);
+
+  const fromPct  = pct(entryMid);
+  const toPct    = pct(price);
+  const leftPct  = Math.min(fromPct, toPct);
+  const widthPct = Math.abs(toPct - fromPct);
+
+  return { leftPct, widthPct, direction };
+}
+
+// ── STATUS UI CONFIG ──────────────────────────────────────────
+function getStatusUI(status, tp1_hit, tp2_hit) {
+  const configs = {
+    waiting: { label:'⏳ Aguardando entrada',         color:'#64748b', pulse:true },
+    active:  { label:'✅ OPERAÇÃO ATIVA',              color:'#22c55e', pulse:true },
+    tp1:     { label:'🎯 TP1 Atingido — Trade aberto', color:'#4ade80', pulse:false },
+    tp2:     { label:'🎯 TP2 Atingido — Trade aberto', color:'#22c55e', pulse:false },
+    tp3:     { label:'🏆 TP3 — Take Profit Final!',    color:'#10b981', pulse:false },
+    stop:    { label:'🛑 Stop Loss Atingido',           color:'#ef4444', pulse:false },
+    invalid: { label:'❌ Inválido — Stop antes da entrada', color:'#ef444488', pulse:false },
+  };
+  return configs[status] || configs.waiting;
+}
 
 // ══════════════════════════════════════════════════════════════
 //  STATE
@@ -610,6 +801,9 @@ let state = {
   user:    JSON.parse(localStorage.getItem('ou_user') || 'null'),
   signals: [],
   history: [],
+  // Guarda estado anterior dos trades para detectar transições
+  // { [signalId]: { activated: bool, tp1_hit: bool, tp2_hit: bool, tp3_hit: bool, stop_hit: bool } }
+  tradeStates: {},
 };
 
 // ══════════════════════════════════════════════════════════════
@@ -701,7 +895,6 @@ function enterApp() {
   renderPlans();
   renderProfile();
   loadSignals();
-  // Recarrega a cada 15 segundos (sincronizado com o watcher)
   setInterval(loadSignals, 15 * 1000);
 }
 
@@ -738,7 +931,6 @@ function switchTab(tab) {
   if (tab === 'history' && state.history.length === 0) loadHistory();
 }
 
-// Fix initial display
 document.addEventListener('DOMContentLoaded', () => {
   ['history','plans','profile'].forEach(t => {
     document.getElementById(`tab-${t}`).style.display = 'none';
@@ -746,11 +938,59 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ══════════════════════════════════════════════════════════════
-//  SIGNALS
+//  SIGNALS — LOAD & PROCESS
 // ══════════════════════════════════════════════════════════════
 async function loadSignals() {
   try {
-    state.signals = await apiFetch('/signals/active');
+    const fresh = await apiFetch('/signals/active');
+
+    // ── Enriquecer cada sinal com estado calculado ──────────
+    fresh.forEach(signal => {
+      const prev = state.tradeStates[signal.id] || {};
+
+      // Carregar o flag _activated do estado salvo
+      signal._activated = prev.activated || false;
+
+      const price = signal.current_price;
+      const calc  = calcTradeState(signal, price);
+
+      // Se entrou na zona de entrada agora, setar _activated = true
+      if (calc.entry_executed) {
+        signal._activated = true;
+        state.tradeStates[signal.id] = {
+          ...prev,
+          activated: true,
+        };
+      }
+
+      // ── Detectar novas transições e disparar toasts ──────
+      if (!signal.closed) {
+        if (calc.status === 'active' && !prev.activated) {
+          showToast(`🟢 ${signal.symbol} — Entrada executada!`);
+        }
+        if (calc.tp1_hit && !prev.tp1_hit) {
+          showToast(`🎯 ${signal.symbol} — TP1 Atingido!`);
+          state.tradeStates[signal.id] = { ...state.tradeStates[signal.id], tp1_hit: true };
+        }
+        if (calc.tp2_hit && !prev.tp2_hit) {
+          showToast(`🎯 ${signal.symbol} — TP2 Atingido!`);
+          state.tradeStates[signal.id] = { ...state.tradeStates[signal.id], tp2_hit: true };
+        }
+        if (calc.tp3_hit && !prev.tp3_hit) {
+          showToast(`🏆 ${signal.symbol} — TP3! Take Profit Final!`);
+          state.tradeStates[signal.id] = { ...state.tradeStates[signal.id], tp3_hit: true };
+        }
+        if (calc.status === 'stop' && !prev.stop_hit) {
+          showToast(`🛑 ${signal.symbol} — Stop atingido.`);
+          state.tradeStates[signal.id] = { ...state.tradeStates[signal.id], stop_hit: true };
+        }
+      }
+
+      // Salvar o estado calculado no signal para uso no render
+      signal._calc = calc;
+    });
+
+    state.signals = fresh;
     renderSignals();
   } catch(e) {
     document.getElementById('signals-list').innerHTML = `
@@ -836,53 +1076,102 @@ function buildSignalCard(signal) {
   const modeColor = MODE_COLORS[mode] || '#3b82f6';
   const modeBadge = `<span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;border:1px solid ${modeColor}44;background:${modeColor}18;color:${modeColor};font-family:var(--font-mono)">${MODE_LABELS[mode]||mode}</span>`;
 
-  // Status do trade
-  const status      = signal.trade_status || 'waiting';
-  const statusColor = STATUS_COLORS[status] || '#64748b';
-  const statusLabel = STATUS_LABELS[status] || status;
-  const statusBar   = accessible && !signal.closed
-    ? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;padding:6px 10px;border-radius:8px;background:${statusColor}15;border:1px solid ${statusColor}33">
-        <span style="font-size:11px;font-weight:700;color:${statusColor}">${statusLabel}</span>
-        ${signal.current_price ? `<span style="font-size:10px;color:var(--text-dim);margin-left:auto">Preço: ${fmtNum(signal.current_price)}</span>` : ''}
-       </div>`
-    : '';
+  // ── Estado calculado do trade ──────────────────────────────
+  const calc = signal._calc || calcTradeState(signal, signal.current_price);
+  const { status, tp1_hit, tp2_hit, tp3_hit, entry_executed } = calc;
+  const statusUI = getStatusUI(status);
 
+  // ── Status bar visual ──────────────────────────────────────
+  let statusBarHtml = '';
+  if (accessible && !signal.closed) {
+    statusBarHtml = `
+      <div class="trade-status-bar" style="background:${statusUI.color}15;border-color:${statusUI.color}33">
+        <div class="trade-status-dot ${statusUI.pulse ? '' : 'static'}" style="background:${statusUI.color}"></div>
+        <span class="trade-status-text" style="color:${statusUI.color}">${statusUI.label}</span>
+        ${signal.current_price
+          ? `<span class="trade-status-price">Preço: ${fmtNum(signal.current_price)}</span>`
+          : ''}
+      </div>`;
+  }
+
+  // ── TP milestones ──────────────────────────────────────────
+  let milestonesHtml = '';
+  if (accessible && !signal.closed && entry_executed) {
+    const hasAnyTp = signal.tp1 != null || signal.tp2 != null || signal.tp3 != null;
+    if (hasAnyTp) {
+      const tps = [];
+      if (signal.tp1 != null) tps.push({ label:'TP1', hit: tp1_hit, color:'#4ade80' });
+      if (signal.tp2 != null) tps.push({ label:'TP2', hit: tp2_hit, color:'#22c55e' });
+      if (signal.tp3 != null) {
+        tps.push({ label:'TP3', hit: tp3_hit, color:'#10b981' });
+      } else {
+        // TP3 ainda não existe — placeholder
+        tps.push({ label:'TP3', hit: false, color:'#334155', placeholder: true });
+      }
+
+      milestonesHtml = `<div class="tp-milestones">` +
+        tps.map(tp => {
+          const style = tp.placeholder
+            ? `color:#334155;border-color:#334155;background:transparent`
+            : tp.hit
+              ? `color:${tp.color};border-color:${tp.color}55;background:${tp.color}22`
+              : `color:${tp.color}55;border-color:${tp.color}22;background:transparent`;
+          const cls = tp.hit ? 'hit' : 'pending';
+          const icon = tp.placeholder ? '—' : tp.hit ? '✓' : '○';
+          return `<div class="tp-milestone ${cls}" style="${style}">${icon} ${tp.label}</div>`;
+        }).join('') +
+      `</div>`;
+    }
+  }
+
+  // ── Fechado badge ──────────────────────────────────────────
   let closedBadge = '';
   if (signal.closed) {
     const { label, color } = closedBadgeInfo(signal.close_reason);
     closedBadge = `<div class="closed-badge" style="color:${color};border-color:${color}44;background:${color}11">${label}</div>`;
   }
 
+  // ── Bias badge ─────────────────────────────────────────────
   let biasHtml = locked
     ? `<span class="bias-badge" style="color:var(--text-muted);border-color:var(--border);background:var(--bg-panel)">🔒 BLOQUEADO</span>`
     : `<span class="bias-badge" style="color:${isShort?'var(--red)':'var(--green)'};border-color:${isShort?'#ef444444':'#22c55e44'};background:${isShort?'#7f1d1d33':'#064e3b33'}">${isShort?'▼ SHORT':'▲ LONG'}</span>`;
 
+  // ── Price bar ──────────────────────────────────────────────
   let barHtml = locked
     ? `<div class="locked-bar">
         <span style="font-size:20px">🔒</span>
         <span class="locked-bar-text">Disponível no <b style="color:${PLAN_COLORS[signal.plan_required]}">${PLAN_LABELS[signal.plan_required]}</b></span>
        </div>`
-    : buildPriceBar(signal);
+    : buildPriceBar(signal, calc);
 
+  // ── Chips extras ───────────────────────────────────────────
   let chipsHtml = '';
   if (accessible) {
     const chips = [];
-    if (signal.regime)         chips.push(['var(--blue)', signal.regime]);
-    if (signal.entry_executed) chips.push(['var(--purple)', 'ENTRADA EXEC.']);
-    if (signal.tp1_hit)        chips.push(['var(--green)', 'TP1 ✓']);
-    if (signal.tp2_hit)        chips.push(['var(--green)', 'TP2 ✓']);
-    if (signal.tp3_hit)        chips.push(['#10b981', 'TP3 ✓']);
-    chipsHtml = `<div class="chips">${chips.map(([c,l]) =>
-      `<span class="chip" style="color:${c};border-color:${c}33;background:${c}18">${l}</span>`
-    ).join('')}</div>`;
+    if (signal.regime) chips.push(['var(--blue)', signal.regime]);
+    if (entry_executed && !signal.closed) chips.push(['var(--purple)', 'ENTRADA EXEC.']);
+    chipsHtml = chips.length
+      ? `<div class="chips">${chips.map(([c,l]) =>
+          `<span class="chip" style="color:${c};border-color:${c}33;background:${c}18">${l}</span>`
+        ).join('')}</div>`
+      : '';
   }
 
-  const topLine = !signal.closed
-    ? `<div class="card-top-line" style="background:${isShort?'var(--red)':'var(--green)'}"></div>`
-    : '';
+  // ── Card top accent line ───────────────────────────────────
+  const topLineColor = signal.closed
+    ? '#334155'
+    : status === 'stop' ? '#ef4444'
+    : (status === 'tp1' || status === 'tp2' || status === 'tp3') ? '#22c55e'
+    : status === 'active' ? '#22c55e'
+    : (isShort ? '#ef4444' : '#22c55e');
+
+  const topLine = `<div class="card-top-line" style="background:${topLineColor}"></div>`;
+
+  // Card glow for active trades
+  const cardGlowClass = (!signal.closed && status === 'active') ? 'trade-active' : '';
 
   return `
-    <div class="signal-card fade-in ${signal.closed?'closed':''} ${locked?'locked':''}"
+    <div class="signal-card fade-in ${signal.closed?'closed':''} ${locked?'locked':''} ${cardGlowClass}"
          ${accessible ? `data-id="${signal.id}"` : ''}>
       ${topLine}
       <div class="card-header">
@@ -900,68 +1189,120 @@ function buildSignalCard(signal) {
         </div>
       </div>
       ${closedBadge}
-      ${statusBar}
+      ${statusBarHtml}
+      ${milestonesHtml}
       ${barHtml}
       ${chipsHtml}
     </div>`;
 }
 
 // ══════════════════════════════════════════════════════════════
-//  PRICE BAR BUILDER
+//  PRICE BAR BUILDER (atualizado com fill dinâmico)
 // ══════════════════════════════════════════════════════════════
-function buildPriceBar(signal) {
+function buildPriceBar(signal, calc) {
   const { bias, stop_loss, entry_min, entry_max, tp1, tp2, tp3 } = signal;
   const current = signal.current_price;
   const isShort = bias === -1;
 
+  // Garantir que temos um calc
+  if (!calc) calc = calcTradeState(signal, current);
+  const { tp1_hit, tp2_hit, tp3_hit, fill } = calc;
+
+  // Pontos para escala
   const allVals = [stop_loss, entry_min, entry_max, tp1, tp2, tp3, current].filter(v => v != null);
   const minVal  = Math.min(...allVals);
   const maxVal  = Math.max(...allVals);
   const range   = maxVal - minVal || 1;
   const pct     = v => ((v - minVal) / range * 100).toFixed(2);
 
-  const entryMid = ((entry_min + entry_max) / 2);
-  const lastTp   = tp3 ?? tp2 ?? tp1;
+  const entryMid  = (entry_min + entry_max) / 2;
+  const lastTp    = tp3 ?? tp2 ?? tp1;
 
-  // Ordem visual correta:
-  // SHORT: STOP(direita) --- ENTRY --- TP1 --- TP2 --- TP3(esquerda)
-  // LONG:  STOP(esquerda) --- ENTRY --- TP1 --- TP2 --- TP3(direita)
-  // TP1 é sempre o mais próximo do entry, TP3 o mais longe
-  const points = [
-    { label:'STOP',  value:stop_loss, color:'#ef4444', shape:'circle' },
-    { label:'ENTRY', value:entryMid,  color:'#facc15', shape:'square' },
-    { label:'TP1',   value:tp1,       color:'#4ade80', shape:'circle', hit: signal.tp1_hit },
-    ...(tp2 != null ? [{ label:'TP2', value:tp2, color:'#22c55e', shape:'circle', hit: signal.tp2_hit }] : []),
-    ...(tp3 != null ? [{ label:'TP3', value:tp3, color:'#10b981', shape:'circle', hit: signal.tp3_hit }] : []),
-  ];
-
+  // Gradiente de fundo (range completo: stop → lastTp)
   const gradLeft  = Math.min(parseFloat(pct(stop_loss)), parseFloat(pct(lastTp)));
   const gradWidth = Math.abs(parseFloat(pct(lastTp)) - parseFloat(pct(stop_loss)));
   const gradStyle = isShort
-    ? `background:linear-gradient(to left,#ef444425,#10b98125)`
-    : `background:linear-gradient(to right,#ef444425,#10b98125)`;
+    ? `background:linear-gradient(to left,#ef444420,#10b98120)`
+    : `background:linear-gradient(to right,#ef444420,#10b98120)`;
 
+  // Zona de entrada
   const entryLeft  = parseFloat(pct(entry_min));
   const entryWidth = parseFloat(pct(entry_max)) - entryLeft;
 
-  let dotsHtml = points.map(p => {
-    const hitStyle = p.hit ? `box-shadow:0 0 12px ${p.color},0 0 4px #fff;opacity:1;` : `box-shadow:0 0 7px ${p.color}99;`;
-    const hitRing  = p.hit ? `<div style="position:absolute;inset:-4px;border-radius:50%;border:2px solid ${p.color};opacity:.5;animation:pulse 1.5s infinite"></div>` : '';
-    return `<div class="pb-dot ${p.shape}" style="left:${pct(p.value)}%;background:${p.color};${hitStyle}position:absolute;">${hitRing}</div>`;
+  // ── Fill dinâmico (entry → preço atual) ───────────────────
+  let fillHtml = '';
+  if (fill && fill.widthPct > 0) {
+    const fillColor = fill.direction === 'profit'
+      ? 'linear-gradient(to right, #22c55e88, #10b98166)'
+      : 'linear-gradient(to right, #ef444488, #dc262666)';
+    // Ajustar direção do gradiente para SHORT
+    const gradient = fill.direction === 'profit'
+      ? (isShort
+          ? 'linear-gradient(to left, #22c55e99, #10b98155)'
+          : 'linear-gradient(to right, #22c55e55, #10b98199)')
+      : (isShort
+          ? 'linear-gradient(to left, #ef444455, #dc262699)'
+          : 'linear-gradient(to right, #ef444455, #dc262699)');
+
+    fillHtml = `<div class="pb-fill" style="left:${fill.leftPct.toFixed(2)}%;width:${fill.widthPct.toFixed(2)}%;background:${gradient};"></div>`;
+  }
+
+  // ── Pontos na barra ────────────────────────────────────────
+  const points = [
+    { label:'STOP',  value:stop_loss, color:'#ef4444', shape:'circle', hit:false },
+    { label:'ENTRY', value:entryMid,  color:'#facc15', shape:'square', hit:false },
+    { label:'TP1',   value:tp1,       color:'#4ade80', shape:'circle', hit:tp1_hit },
+    ...(tp2 != null ? [{ label:'TP2', value:tp2, color:'#22c55e', shape:'circle', hit:tp2_hit }] : []),
+    ...(tp3 != null
+      ? [{ label:'TP3', value:tp3, color:'#10b981', shape:'circle', hit:tp3_hit }]
+      : [{ label:'TP3', value:null, color:'#334155', shape:'circle', hit:false, placeholder:true }]
+    ),
+  ].filter(p => p.value != null || p.placeholder);
+
+  const dotsHtml = points.filter(p => !p.placeholder && p.value != null).map(p => {
+    const hitClass = p.hit ? 'hit' : '';
+    const glow     = p.hit
+      ? `box-shadow:0 0 14px ${p.color},0 0 4px #fff;`
+      : `box-shadow:0 0 6px ${p.color}88;`;
+    const checkHtml = p.hit && p.shape === 'circle'
+      ? `<div class="pb-dot-check">✓</div><div class="pb-dot-ring" style="border-color:${p.color}"></div>`
+      : '';
+    return `<div class="pb-dot ${p.shape} ${hitClass}" style="left:${pct(p.value)}%;background:${p.hit ? p.color : p.color};${glow}">${checkHtml}</div>`;
   }).join('');
 
-  let needleHtml = current != null
+  // Agulha do preço atual
+  const needleHtml = current != null
     ? `<div class="pb-needle" style="left:${pct(current)}%">
         <div class="pb-needle-label">▼ ${fmtNum(current)}</div>
        </div>`
     : '';
 
-  let labelsHtml = points.map(p =>
-    `<div class="pb-label" style="left:${pct(p.value)}%">
-       <div class="pb-label-name" style="color:${p.color};${p.hit?'text-decoration:line-through':''}">${p.label}${p.hit?' ✓':''}</div>
-       <div class="pb-label-value">${fmtNum(p.value)}</div>
-     </div>`
-  ).join('');
+  // Labels com TP3 placeholder se não existir
+  const labelsHtml = points.map(p => {
+    if (p.placeholder) {
+      // TP3 placeholder: posiciona além do TP2 no lado correto
+      const tp2Val = tp2 ?? tp1;
+      const offset = isShort
+        ? tp2Val - (entry_min - stop_loss) * 0.15  // SHORT: esquerda
+        : tp2Val + (entry_min - stop_loss) * 0.15; // LONG: direita (vai ficar fora às vezes — ok)
+      // Usa posição relativa estimada, ou simplesmente oculta se não tiver tp2
+      if (!tp2Val) return '';
+      const pos = parseFloat(pct(tp2Val)) + (isShort ? -8 : 8);
+      const clampedPos = Math.max(0, Math.min(95, pos));
+      return `<div class="pb-label" style="left:${clampedPos}%">
+        <div class="pb-label-name" style="color:#334155">TP3</div>
+        <div class="pb-label-value" style="color:#334155">em breve</div>
+      </div>`;
+    }
+    const nameStyle = p.hit
+      ? `color:${p.color};text-shadow:0 0 8px ${p.color}88;`
+      : `color:${p.color};`;
+    const suffix = p.hit ? ' ✓' : '';
+    return `<div class="pb-label" style="left:${pct(p.value)}%">
+      <div class="pb-label-name" style="${nameStyle}">${p.label}${suffix}</div>
+      <div class="pb-label-value">${fmtNum(p.value)}</div>
+    </div>`;
+  }).join('');
 
   return `
     <div class="price-bar-wrap">
@@ -969,6 +1310,7 @@ function buildPriceBar(signal) {
         <div class="pb-track"></div>
         <div class="pb-grad" style="left:${gradLeft}%;width:${gradWidth}%;${gradStyle}"></div>
         <div class="pb-entry-zone" style="left:${entryLeft}%;width:${entryWidth}%"></div>
+        ${fillHtml}
         ${dotsHtml}
         ${needleHtml}
       </div>
@@ -987,8 +1329,16 @@ async function openDetail(id) {
   overlay.classList.add('open');
 
   try {
-    const signal = await apiFetch(`/signals/${id}`);
+    const signal  = await apiFetch(`/signals/${id}`);
     const isShort = signal.bias === -1;
+
+    // Reusar o _calc se já foi calculado, senão recalcular
+    const existing = state.signals.find(s => s.id === id);
+    if (existing?._activated) signal._activated = existing._activated;
+    const calc = calcTradeState(signal, signal.current_price);
+    signal._calc = calc;
+    const { status, tp1_hit, tp2_hit, tp3_hit, entry_executed } = calc;
+    const statusUI = getStatusUI(status);
 
     const rows = [
       { label:'Entrada mín.',  value: fmtNum(signal.entry_min),  color:'#facc15' },
@@ -996,7 +1346,7 @@ async function openDetail(id) {
       { label:'Stop Loss',     value: fmtNum(signal.stop_loss),  color:'#ef4444' },
       { label:'Alvo 1 (TP1)', value: fmtNum(signal.tp1),         color:'#4ade80' },
       { label:'Alvo 2 (TP2)', value: fmtNum(signal.tp2),         color:'#22c55e' },
-      { label:'Alvo 3 (TP3)', value: fmtNum(signal.tp3),         color:'#10b981' },
+      { label:'Alvo 3 (TP3)', value: signal.tp3 != null ? fmtNum(signal.tp3) : '— em breve', color:'#10b981' },
       { label:'Score',         value: signal.score,               color: signal.score>=80?'#22c55e':'#facc15' },
       { label:'Regime',        value: signal.regime||'—',         color:'#3b82f6' },
       { label:'Ação KEO',      value: signal.keo_action||'—',     color: isShort?'#ef4444':'#22c55e' },
@@ -1006,6 +1356,40 @@ async function openDetail(id) {
     const closedBadgeHtml = signal.closed
       ? `<div class="closed-badge" style="color:${clColor};border-color:${clColor}44;background:${clColor}11">${clLabel}</div>`
       : '';
+
+    // Status bar no detalhe
+    const statusDetailHtml = !signal.closed ? `
+      <div class="trade-status-bar" style="background:${statusUI.color}15;border-color:${statusUI.color}33;margin-bottom:14px">
+        <div class="trade-status-dot ${statusUI.pulse ? '' : 'static'}" style="background:${statusUI.color}"></div>
+        <span class="trade-status-text" style="color:${statusUI.color}">${statusUI.label}</span>
+        ${signal.current_price ? `<span class="trade-status-price">Preço: ${fmtNum(signal.current_price)}</span>` : ''}
+      </div>` : '';
+
+    // Milestones no detalhe
+    let milestonesDetailHtml = '';
+    if (!signal.closed && entry_executed) {
+      const tpItems = [
+        { label:'TP1', hit:tp1_hit, color:'#4ade80', has: signal.tp1 != null },
+        { label:'TP2', hit:tp2_hit, color:'#22c55e', has: signal.tp2 != null },
+        { label:'TP3', hit:tp3_hit, color:'#10b981', has: signal.tp3 != null, placeholder: signal.tp3 == null },
+      ].filter(t => t.has || t.placeholder);
+
+      if (tpItems.length) {
+        milestonesDetailHtml = `<div class="tp-milestones" style="margin-bottom:14px">` +
+          tpItems.map(tp => {
+            const style = tp.placeholder
+              ? `color:#334155;border-color:#334155;background:transparent`
+              : tp.hit
+                ? `color:${tp.color};border-color:${tp.color}55;background:${tp.color}22`
+                : `color:${tp.color}55;border-color:${tp.color}22;background:transparent`;
+            const cls = tp.hit ? 'hit' : 'pending';
+            const icon = tp.placeholder ? '—' : tp.hit ? '✓' : '○';
+            const txt  = tp.placeholder ? `${tp.label} (em breve)` : tp.label;
+            return `<div class="tp-milestone ${cls}" style="${style}">${icon} ${txt}</div>`;
+          }).join('') +
+        `</div>`;
+      }
+    }
 
     body.innerHTML = `
       <div class="sheet-header">
@@ -1018,9 +1402,11 @@ async function openDetail(id) {
         </span>
       </div>
       ${closedBadgeHtml}
+      ${statusDetailHtml}
+      ${milestonesDetailHtml}
       <div class="detail-map-card">
         <div class="detail-map-title">MAPA DA OPERAÇÃO</div>
-        ${buildPriceBar(signal)}
+        ${buildPriceBar(signal, calc)}
       </div>
       <div class="data-card">
         ${rows.map(r => `
@@ -1146,7 +1532,7 @@ function renderProfile() {
     </div>
 
     <button class="btn-logout" onclick="doLogout()">Sair da conta</button>
-    <div class="app-version">OUEngine v1.0.0</div>
+    <div class="app-version">OUEngine v2.0.0</div>
   `;
 }
 
@@ -1185,7 +1571,7 @@ function closedBadgeInfo(reason) {
 function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 3000);
+  setTimeout(() => t.classList.remove('show'), 3500);
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1213,7 +1599,6 @@ document.getElementById('btn-dismiss').addEventListener('click', () => {
 //  BOOT
 // ══════════════════════════════════════════════════════════════
 if (state.token && state.user) {
-  // Verifica se token ainda é válido
   apiFetch('/auth/me').then(me => {
     state.user = me;
     localStorage.setItem('ou_user', JSON.stringify(me));
@@ -1223,8 +1608,6 @@ if (state.token && state.user) {
     localStorage.removeItem('ou_token');
     localStorage.removeItem('ou_user');
   });
-} else {
-  // Já na tela de login
 }
 </script>
 <script>
