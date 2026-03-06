@@ -580,6 +580,28 @@ const PLAN_ORDER  = { free:0, level1:1, level2:2, level3:3 };
 const PLAN_COLORS = { free:'#6b7280', level1:'#3b82f6', level2:'#8b5cf6', level3:'#f59e0b' };
 const PLAN_LABELS = { free:'FREE', level1:'PLANO 1', level2:'PLANO 2', level3:'PLANO 3' };
 
+const MODE_LABELS = { SCL:'SCALP', DTD:'DAY TRADE', SWG:'SWING' };
+const MODE_COLORS = { SCL:'#f59e0b', DTD:'#3b82f6', SWG:'#8b5cf6' };
+
+const STATUS_LABELS = {
+  waiting: '⏳ Aguardando ativação',
+  active:  '✅ OPERAÇÃO ATIVA',
+  tp1:     '🎯 TP1 atingido',
+  tp2:     '🎯 TP2 atingido',
+  tp3:     '🎯 TP3 atingido',
+  stop:    '🛑 Stop atingido',
+  invalid: '❌ Inválido (stop antes da entrada)',
+};
+const STATUS_COLORS = {
+  waiting: '#64748b',
+  active:  '#22c55e',
+  tp1:     '#4ade80',
+  tp2:     '#22c55e',
+  tp3:     '#10b981',
+  stop:    '#ef4444',
+  invalid: '#ef444488',
+};
+
 // ══════════════════════════════════════════════════════════════
 //  STATE
 // ══════════════════════════════════════════════════════════════
@@ -809,6 +831,22 @@ function buildSignalCard(signal) {
   const scoreColor = signal.score >= 80 ? '#22c55e' : signal.score >= 65 ? '#facc15' : '#ef4444';
   const locked     = !accessible;
 
+  // Badge de modo
+  const mode      = signal.signal_mode || 'DTD';
+  const modeColor = MODE_COLORS[mode] || '#3b82f6';
+  const modeBadge = `<span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;border:1px solid ${modeColor}44;background:${modeColor}18;color:${modeColor};font-family:var(--font-mono)">${MODE_LABELS[mode]||mode}</span>`;
+
+  // Status do trade
+  const status      = signal.trade_status || 'waiting';
+  const statusColor = STATUS_COLORS[status] || '#64748b';
+  const statusLabel = STATUS_LABELS[status] || status;
+  const statusBar   = accessible && !signal.closed
+    ? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;padding:6px 10px;border-radius:8px;background:${statusColor}15;border:1px solid ${statusColor}33">
+        <span style="font-size:11px;font-weight:700;color:${statusColor}">${statusLabel}</span>
+        ${signal.current_price ? `<span style="font-size:10px;color:var(--text-dim);margin-left:auto">Preço: ${fmtNum(signal.current_price)}</span>` : ''}
+       </div>`
+    : '';
+
   let closedBadge = '';
   if (signal.closed) {
     const { label, color } = closedBadgeInfo(signal.close_reason);
@@ -852,6 +890,7 @@ function buildSignalCard(signal) {
           <div class="card-symbol-row">
             <span class="card-symbol">${signal.symbol}</span>
             ${biasHtml}
+            ${modeBadge}
           </div>
           <div class="card-date">${signal.signal_date}</div>
         </div>
@@ -861,6 +900,7 @@ function buildSignalCard(signal) {
         </div>
       </div>
       ${closedBadge}
+      ${statusBar}
       ${barHtml}
       ${chipsHtml}
     </div>`;
@@ -883,12 +923,16 @@ function buildPriceBar(signal) {
   const entryMid = ((entry_min + entry_max) / 2);
   const lastTp   = tp3 ?? tp2 ?? tp1;
 
+  // Ordem visual correta:
+  // SHORT: STOP(direita) --- ENTRY --- TP1 --- TP2 --- TP3(esquerda)
+  // LONG:  STOP(esquerda) --- ENTRY --- TP1 --- TP2 --- TP3(direita)
+  // TP1 é sempre o mais próximo do entry, TP3 o mais longe
   const points = [
-    { label:'STOP',  value:stop_loss,  color:'#ef4444', shape:'circle' },
-    { label:'ENTRY', value:entryMid,   color:'#facc15', shape:'square' },
-    { label:'TP1',   value:tp1,        color:'#4ade80', shape:'circle' },
-    ...(tp2 != null ? [{ label:'TP2', value:tp2, color:'#22c55e', shape:'circle' }] : []),
-    ...(tp3 != null ? [{ label:'TP3', value:tp3, color:'#10b981', shape:'circle' }] : []),
+    { label:'STOP',  value:stop_loss, color:'#ef4444', shape:'circle' },
+    { label:'ENTRY', value:entryMid,  color:'#facc15', shape:'square' },
+    { label:'TP1',   value:tp1,       color:'#4ade80', shape:'circle', hit: signal.tp1_hit },
+    ...(tp2 != null ? [{ label:'TP2', value:tp2, color:'#22c55e', shape:'circle', hit: signal.tp2_hit }] : []),
+    ...(tp3 != null ? [{ label:'TP3', value:tp3, color:'#10b981', shape:'circle', hit: signal.tp3_hit }] : []),
   ];
 
   const gradLeft  = Math.min(parseFloat(pct(stop_loss)), parseFloat(pct(lastTp)));
@@ -900,9 +944,11 @@ function buildPriceBar(signal) {
   const entryLeft  = parseFloat(pct(entry_min));
   const entryWidth = parseFloat(pct(entry_max)) - entryLeft;
 
-  let dotsHtml = points.map(p =>
-    `<div class="pb-dot ${p.shape}" style="left:${pct(p.value)}%;background:${p.color};box-shadow:0 0 7px ${p.color}99"></div>`
-  ).join('');
+  let dotsHtml = points.map(p => {
+    const hitStyle = p.hit ? `box-shadow:0 0 12px ${p.color},0 0 4px #fff;opacity:1;` : `box-shadow:0 0 7px ${p.color}99;`;
+    const hitRing  = p.hit ? `<div style="position:absolute;inset:-4px;border-radius:50%;border:2px solid ${p.color};opacity:.5;animation:pulse 1.5s infinite"></div>` : '';
+    return `<div class="pb-dot ${p.shape}" style="left:${pct(p.value)}%;background:${p.color};${hitStyle}position:absolute;">${hitRing}</div>`;
+  }).join('');
 
   let needleHtml = current != null
     ? `<div class="pb-needle" style="left:${pct(current)}%">
@@ -912,7 +958,7 @@ function buildPriceBar(signal) {
 
   let labelsHtml = points.map(p =>
     `<div class="pb-label" style="left:${pct(p.value)}%">
-       <div class="pb-label-name" style="color:${p.color}">${p.label}</div>
+       <div class="pb-label-name" style="color:${p.color};${p.hit?'text-decoration:line-through':''}">${p.label}${p.hit?' ✓':''}</div>
        <div class="pb-label-value">${fmtNum(p.value)}</div>
      </div>`
   ).join('');
