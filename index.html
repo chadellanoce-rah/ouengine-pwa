@@ -354,8 +354,9 @@ async function apiFetch(path, opts = {}) {
 // ══════════════════════════════════════════════════════════════
 function calcFill(signal) {
   const { bias, entry_min, entry_max, stop_loss, tp1, tp2, tp3, current_price, trade_status } = signal;
+  // Agulha sempre aparece se tiver preço — independente do status
   if (!current_price || !entry_min || !stop_loss) return null;
-  if (trade_status === 'waiting' || trade_status === 'invalid') return null;
+  if (trade_status === 'invalid') return null;
 
   const isShort  = bias === -1;
   const entryMax = entry_max || entry_min;
@@ -370,10 +371,14 @@ function calcFill(signal) {
   const toPct   = pct(current_price);
   const towardProfit = isShort ? current_price < entryMid : current_price > entryMid;
 
+  // Em waiting: mostra fill cinza (preço longe da entrada) vs fill colorido (próximo)
+  const isWaiting = trade_status === 'waiting';
+
   return {
     leftPct:   Math.min(fromPct, toPct),
     widthPct:  Math.abs(toPct - fromPct),
     direction: towardProfit ? 'profit' : 'loss',
+    isWaiting,
     isShort,
   };
 }
@@ -659,13 +664,22 @@ function buildSignalCard(signal) {
 function buildPriceBar(signal) {
   const { bias, stop_loss, entry_min, entry_max, tp1, tp2, tp3, current_price } = signal;
   const isShort  = bias === -1;
-  const entryMax = entry_max || entry_min;
-  const entryMid = (entry_min + entryMax) / 2;
 
+  // Ponto exato de entrada para o label (entry_point salvo pelo upload.js)
+  // Fallback: média da zona
+  const entryPoint = signal.entry_point ?? ((entry_min + (entry_max || entry_min)) / 2);
+  const entryMax   = entry_max || entry_min;
+
+  // Inclui current_price no cálculo de escala para a agulha nunca sair da barra
   const allVals = [stop_loss, entry_min, entryMax, tp1, tp2, tp3, current_price].filter(v=>v!=null);
+  if (!allVals.length) return '';
   const minVal  = Math.min(...allVals);
-  const range   = Math.max(...allVals) - minVal || 1;
-  const pct     = v => ((v - minVal) / range * 100).toFixed(2);
+  const maxVal  = Math.max(...allVals);
+  // Adiciona 2% de padding nas bordas para agulha não colar nas extremidades
+  const padding = (maxVal - minVal) * 0.02;
+  const rangeMin = minVal - padding;
+  const range    = (maxVal + padding) - rangeMin || 1;
+  const pct      = v => Math.max(0, Math.min(98, ((v - rangeMin) / range * 100))).toFixed(2);
 
   const lastTp = tp3 ?? tp2 ?? tp1;
   const gradLeft  = Math.min(parseFloat(pct(stop_loss)), parseFloat(pct(lastTp)));
@@ -674,53 +688,62 @@ function buildPriceBar(signal) {
     ? `background:linear-gradient(to left,#ef444420,#10b98120)`
     : `background:linear-gradient(to right,#ef444420,#10b98120)`;
 
-  const entryLeft  = parseFloat(pct(entry_min));
-  const entryWidth = Math.max(parseFloat(pct(entryMax)) - entryLeft, 0.5);
+  // Zona de entrada — largura mínima de 1.5% para ser visível
+  const entryLeftPct  = parseFloat(pct(entry_min));
+  const entryRightPct = parseFloat(pct(entryMax));
+  const entryWidth    = Math.max(Math.abs(entryRightPct - entryLeftPct), 1.5);
 
-  // Fill dinâmico entry → preço atual
+  // Fill: entry → preço atual (aparece em todos os estados exceto invalid)
   let fillHtml = '';
   const fill = calcFill(signal);
-  if (fill && fill.widthPct > 0.1) {
-    const gradient = fill.direction === 'profit'
-      ? (isShort ? 'linear-gradient(to left,#22c55e99,#10b98155)' : 'linear-gradient(to right,#22c55e55,#10b98199)')
-      : (isShort ? 'linear-gradient(to left,#ef444455,#dc262699)' : 'linear-gradient(to right,#ef444455,#dc262699)');
+  if (fill && fill.widthPct > 0.05) {
+    let gradient;
+    if (fill.isWaiting) {
+      // Waiting: fill cinza indicando distância até a entrada
+      gradient = 'linear-gradient(to right,#33415522,#47556944)';
+    } else {
+      gradient = fill.direction === 'profit'
+        ? (isShort ? 'linear-gradient(to left,#22c55e99,#10b98155)' : 'linear-gradient(to right,#22c55e55,#10b98199)')
+        : (isShort ? 'linear-gradient(to left,#ef444455,#dc262699)' : 'linear-gradient(to right,#ef444455,#dc262699)');
+    }
     fillHtml = `<div class="pb-fill" style="left:${fill.leftPct.toFixed(2)}%;width:${fill.widthPct.toFixed(2)}%;background:${gradient}"></div>`;
   }
 
   // Pontos — estado dos TPs vem do banco (imutável)
   const points = [
-    { label:'STOP',  value:stop_loss, color:'#ef4444', shape:'circle', hit:false },
-    { label:'ENTRY', value:entryMid,  color:'#facc15', shape:'square', hit:false },
-    { label:'TP1',   value:tp1,       color:'#4ade80', shape:'circle', hit:!!signal.tp1_hit },
-    ...(tp2!=null ? [{ label:'TP2', value:tp2, color:'#22c55e', shape:'circle', hit:!!signal.tp2_hit }] : []),
-    ...(tp3!=null ? [{ label:'TP3', value:tp3, color:'#10b981', shape:'circle', hit:!!signal.tp3_hit }] : []),
+    { label:'STOP',  value:stop_loss,  labelValue:stop_loss,  color:'#ef4444', shape:'circle', hit:false },
+    { label:'ENTRY', value:entryPoint, labelValue:entryPoint, color:'#facc15', shape:'square', hit:false },
+    { label:'TP1',   value:tp1,        labelValue:tp1,        color:'#4ade80', shape:'circle', hit:!!signal.tp1_hit },
+    ...(tp2!=null ? [{ label:'TP2', value:tp2, labelValue:tp2, color:'#22c55e', shape:'circle', hit:!!signal.tp2_hit }] : []),
+    ...(tp3!=null ? [{ label:'TP3', value:tp3, labelValue:tp3, color:'#10b981', shape:'circle', hit:!!signal.tp3_hit }] : []),
   ];
 
   const dotsHtml = points.map(p => {
-    const glow = p.hit ? `box-shadow:0 0 14px ${p.color},0 0 4px #fff` : `box-shadow:0 0 6px ${p.color}88`;
+    const glow  = p.hit ? `box-shadow:0 0 14px ${p.color},0 0 4px #fff` : `box-shadow:0 0 6px ${p.color}88`;
     const inner = p.hit ? `<div class="pb-dot-check">✓</div><div class="pb-dot-ring" style="border-color:${p.color}"></div>` : '';
     return `<div class="pb-dot ${p.shape} ${p.hit?'hit':''}" style="left:${pct(p.value)}%;background:${p.color};${glow}">${inner}</div>`;
   }).join('');
 
+  // Agulha — sempre visível quando tiver preço atual
   const needleHtml = current_price != null
     ? `<div class="pb-needle" style="left:${pct(current_price)}%"><div class="pb-needle-label">▼ ${fmtNum(current_price)}</div></div>`
     : '';
 
-  // Labels + TP3 placeholder se não existir
+  // Labels
   const allLabels = [...points];
   if (tp3==null && tp2!=null) {
     const tp2Pct = parseFloat(pct(tp2));
     const tp1Pct = parseFloat(pct(tp1));
-    const estPct = Math.max(0, Math.min(96, tp2Pct + (tp2Pct-tp1Pct)*0.8));
+    const estPct = Math.max(0, Math.min(96, tp2Pct + (tp2Pct - tp1Pct) * 0.8));
     allLabels.push({ label:'TP3', placeholder:true, estPct, color:'#334155' });
   }
 
   const labelsHtml = allLabels.map(p => {
-    const pos = p.placeholder ? p.estPct.toFixed(2) : pct(p.value);
+    const pos   = p.placeholder ? p.estPct.toFixed(2) : pct(p.value);
     const clamp = Math.max(0, Math.min(96, parseFloat(pos)));
-    if (p.placeholder) return `<div class="pb-label" style="left:${clamp}%"><div class="pb-label-name" style="color:#334155">TP3</div><div class="pb-label-value" style="color:#334155">em breve</div></div>`;
+    if (p.placeholder) return `<div class="pb-label" style="left:${clamp}%"><div class="pb-label-name" style="color:#334155">TP3</div><div class="pb-label-value" style="color:#334155">—</div></div>`;
     const nameStyle = p.hit ? `color:${p.color};text-shadow:0 0 8px ${p.color}88` : `color:${p.color}`;
-    return `<div class="pb-label" style="left:${clamp}%"><div class="pb-label-name" style="${nameStyle}">${p.label}${p.hit?' ✓':''}</div><div class="pb-label-value">${fmtNum(p.value)}</div></div>`;
+    return `<div class="pb-label" style="left:${clamp}%"><div class="pb-label-name" style="${nameStyle}">${p.label}${p.hit?' ✓':''}</div><div class="pb-label-value">${fmtNum(p.labelValue)}</div></div>`;
   }).join('');
 
   return `
@@ -728,7 +751,7 @@ function buildPriceBar(signal) {
       <div class="price-bar-track-area">
         <div class="pb-track"></div>
         <div class="pb-grad" style="left:${gradLeft}%;width:${gradWidth}%;${gradStyle}"></div>
-        <div class="pb-entry-zone" style="left:${entryLeft}%;width:${entryWidth}%"></div>
+        <div class="pb-entry-zone" style="left:${Math.min(entryLeftPct,entryRightPct)}%;width:${entryWidth}%"></div>
         ${fillHtml}
         ${dotsHtml}
         ${needleHtml}
